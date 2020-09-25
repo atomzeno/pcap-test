@@ -54,7 +54,7 @@ int main(int argc, char* argv[]) {
     }
     int packet_number=0;
     while (true) {
-        unsigned int i;
+        int i;
         struct pcap_pkthdr* header;
         const u_char* packet;
         int res = pcap_next_ex(handle, &header, &packet);
@@ -68,30 +68,35 @@ int main(int argc, char* argv[]) {
         struct libnet_ethernet_hdr* packet_eth=(struct libnet_ethernet_hdr *)(packet);
         packet_eth->ether_type=ntohs(packet_eth->ether_type);
 
-        if(packet_eth->ether_type != 0x0800){//ipv4 use X
+        if(packet_eth->ether_type != ETHERTYPE_IP){//ipv4 use X
             printf("This packet don't use ipv4!");
             continue;
         }
-
-        struct libnet_ipv4_hdr *packet_ip=(struct libnet_ipv4_hdr *)(packet + 14);
-        if(packet_ip->ip_p!=0x06){//protocol isn't tcp
+        int eth_header_size=(int)sizeof(struct libnet_ethernet_hdr);
+        struct libnet_ipv4_hdr *packet_ip=(struct libnet_ipv4_hdr *)(packet + eth_header_size);
+        if(packet_ip->ip_p!=IPPROTO_TCP){//protocol isn't tcp
             continue;
         }
         printf("--------------Packet analyze--------------\n");
+        printf("size of eth header : %d\n",eth_header_size);
         printf("This packet is %dth\n", packet_number);
         printf("%u bytes captured\n", header->caplen);
         print_Ethernet_Header(packet_eth);
         //ethernet part ended
         printf("--------------IP Header--------------\n");
-        printf("IP version : %02x\n", packet_ip->ip_v);
-        printf("IP protocol : %02x\n", packet_ip->ip_p);
+        printf("IP version : %#02x\n", packet_ip->ip_v);
+        printf("IP protocol : %#02x\n", packet_ip->ip_p);
+        printf("IP header length : %#02x\n", packet_ip->ip_hl << 2);
+        int total_packet_length=(int)ntohs(packet_ip->ip_len);
+        printf("IP header, total packet length : %d\n", total_packet_length);
+
         printf("Src ip : %s \n",inet_ntoa(packet_ip->ip_src));
         printf("Dst ip : %s \n",inet_ntoa(packet_ip->ip_dst));
 
-        //printf("ip_hl : %02x\n",packet_ip->ip_hl);
+        //printf("ip_hl : %#02x\n",packet_ip->ip_hl);
         //ip part ended
-
-        int tcp_header_offset = ((int)packet_ip->ip_hl)*4 + 14;//word --> byte, * 4
+        int ip_header_length = ((int)packet_ip->ip_hl)*4;
+        int tcp_header_offset = ip_header_length + eth_header_size;//word --> byte, * 4
         //ip_hl : ip's header length
         //printf("tcp_header_offset : %d\n",tcp_header_offset);
 
@@ -102,17 +107,21 @@ int main(int argc, char* argv[]) {
 
         //u_int16_t th_sport;       /* source port */
         //u_int16_t th_dport;       /* destination port */
+        int tcp_header_length = ((int)packet_tcp->th_off)*4;
 
-        int packet_data_offset=tcp_header_offset+((int)packet_tcp->th_off)*4;
+        int packet_data_offset=tcp_header_offset+tcp_header_length;
         //word to byte, *4, data offset
-        //printf("%02x\n",packet_tcp->th_off);
+        //printf("%#02x\n",packet_tcp->th_off);
         //printf("packet_data_offset : %d\n",packet_data_offset);
         u_int8_t * packet_output=(u_int8_t *)(packet + packet_data_offset);
         printf("--------------Payload--------------\n");
-        printf("packet's payload is %d bytes\n", (header->caplen-packet_data_offset));
-        if((header->caplen-packet_data_offset)!=0){
-            printf("packet's 16 byte data : ");
-            for(i=0;i<16 && i<(header->caplen-packet_data_offset);i++){
+        //printf("packet's payload is %d bytes\n", (header->caplen-packet_data_offset));
+        int packet_length=total_packet_length-ip_header_length-tcp_header_length;
+        printf("packet's payload is %d bytes\n", packet_length);
+        packet_length=(packet_length < 16 ? packet_length : 16);
+        if(packet_length!=0){
+            printf("packet's %d byte data : ", packet_length);
+            for(i=0;i<16 && i<(packet_length);i++){
                 printf("%c",packet_output[i]);
             }
         }
